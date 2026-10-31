@@ -1,0 +1,45 @@
+import {chromium} from '@playwright/test';
+import assert from 'node:assert/strict';
+import {existsSync} from 'node:fs';
+const browser=await chromium.launch({executablePath:existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined,headless:true,args:['--no-sandbox']});
+const page=await browser.newPage();
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+await page.goto('http://127.0.0.1:5182/');
+assert.equal(await page.locator('article').count(),12);
+await page.getByRole('button',{name:'+ Suivre',exact:true}).first().click();
+await page.getByRole('button',{name:'Ma bibliothèque',exact:true}).click();
+assert.equal(await page.locator('article').count(),1);
+await page.getByPlaceholder('Rechercher un film ou une série…').fill('zzz');
+await page.getByRole('button',{name:'Réinitialiser les filtres',exact:true}).click();
+assert.equal(await page.locator('article').count(),1);
+assert.equal(await page.getByRole('button',{name:'Ma bibliothèque',exact:true}).getAttribute('aria-pressed'),'true');
+await page.getByRole('link',{name:'Voir la fiche ↗',exact:true}).click();
+await page.getByRole('button',{name:'Vu',exact:true}).click();
+await page.reload();
+assert.equal(await page.getByRole('button',{name:'✓ Vu',exact:true}).getAttribute('aria-pressed'),'true');
+for(const width of [320,375,768,1440]){
+ await page.setViewportSize({width,height:900});
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth), 'overflow at '+width);
+}
+await page.getByLabel('Langue',{exact:true}).selectOption('en');
+await page.reload();await page.getByRole('link',{name:'Settings',exact:true}).click();
+const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Export my library'}).click();const download=await downloadPromise;assert.equal(download.suggestedFilename(),'mytracker-backup.json');
+await page.getByRole('link',{name:'Explore all',exact:true}).click();
+await page.getByRole('button',{name:'My library',exact:true}).click();
+page.on('dialog',d=>d.accept());
+await page.getByRole('button',{name:'Remove',exact:true}).click();
+assert.equal(await page.locator('article').count(),0);
+await page.getByRole('button',{name:'Explore all',exact:true}).click();
+await page.locator('.filters select').first().selectOption('tv');
+await page.getByRole('button',{name:'+ Track',exact:true}).first().click();
+await page.getByRole('link',{name:'View details ↗',exact:true}).first().click();
+await page.getByLabel('Progress',{exact:true}).fill('8');
+await page.reload();
+assert.equal(await page.getByLabel('Progress',{exact:true}).inputValue(),'8');
+await page.getByRole('link',{name:'Settings',exact:true}).click();
+await page.locator('input[type=file]').setInputFiles({name:'invalid.json',mimeType:'application/json',buffer:Buffer.from('{"app":"Mytracker","version":1,"entries":{"bad":{}}}')});
+await page.getByRole('alert').filter({hasText:'Invalid backup'}).waitFor();
+assert.deepEqual(errors,[]);
+
+await browser.close();
+console.log('PASS: catalogue, ajout, filtres, reset conserve bibliothèque, progression persistée, langues, export, responsive 320/375/768/1440, aucune erreur JS');
